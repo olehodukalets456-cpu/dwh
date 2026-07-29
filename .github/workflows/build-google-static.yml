@@ -6,6 +6,9 @@ on:
       - '.github/workflows/build-google-static.yml'
       - 'google/build-static-trigger.txt'
       - 'google/data/**'
+  pull_request:
+    paths:
+      - 'google/build-static-trigger.txt'
   workflow_dispatch:
 
 permissions:
@@ -19,6 +22,7 @@ jobs:
         uses: actions/checkout@v4
         with:
           fetch-depth: 0
+          ref: ${{ github.event_name == 'pull_request' && github.head_ref || github.ref_name }}
 
       - name: Decode original landing
         shell: bash
@@ -77,4 +81,4 @@ jobs:
             exit 0
           fi
           git commit -m 'Serve original Google landing as static HTML'
-          git push
+          git push origin HEAD:${{ github.event_name == 'pull_request' && github.head_ref || github.ref_name }}
