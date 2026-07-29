@@ -1,60 +1,56 @@
-name: Deploy original Google landing
+name: Install Google landing package
 
 on:
-  pull_request:
+  push:
+    branches:
+      - main
     paths:
-      - 'google-deploy-payload/**'
-  workflow_dispatch:
+      - 'google-ready.zip'
 
 permissions:
   contents: write
 
 jobs:
-  deploy:
+  install:
     runs-on: ubuntu-latest
     steps:
-      - name: Checkout source branch
+      - name: Checkout
         uses: actions/checkout@v4
         with:
           fetch-depth: 0
-          ref: ${{ github.head_ref || github.ref_name }}
 
-      - name: Restore original static landing
+      - name: Validate and install package
         shell: bash
         run: |
-          if [ ! -d google-deploy-payload ]; then
-            echo 'Payload already consumed'
-            exit 0
-          fi
+          test -f google-ready.zip
+          rm -rf /tmp/google-ready
+          mkdir -p /tmp/google-ready
+          unzip -q google-ready.zip -d /tmp/google-ready
 
-          cat google-deploy-payload/part-*.txt | base64 --decode > /tmp/google-site.tar.gz
-          gzip -t /tmp/google-site.tar.gz
+          test -f /tmp/google-ready/google/index.html
+          test -f /tmp/google-ready/google/_next/static/chunks/2f5u3uk0o3gkc.css
+          test -f /tmp/google-ready/google/landing/hero/bg.png
+          test -f /tmp/google-ready/google/landing/compatibility/google-meta.png
+          test -f /tmp/google-ready/.nojekyll
 
-          rm -rf google
-          tar -xzf /tmp/google-site.tar.gz -C .
-          rm -rf google-deploy-payload
-
-          test -f google/index.html
-          test -f google/_next/static/chunks/2f5u3uk0o3gkc.css
-          test -f google/landing/hero/bg.png
-          test -f google/landing/compatibility/google-meta.png
-
-          if grep -q 'Failed to Decode Data\|__DWH_PARTS__\|DecompressionStream\|atob(' google/index.html; then
-            echo 'Old broken loader is still present'
+          if grep -q 'Failed to Decode Data\|__DWH_PARTS__\|DecompressionStream\|atob(' /tmp/google-ready/google/index.html; then
+            echo 'Package contains the old broken loader'
             exit 1
           fi
 
-          echo "Static landing restored: $(wc -c < google/index.html) bytes"
+          rm -rf google
+          cp -a /tmp/google-ready/google ./google
+          cp /tmp/google-ready/.nojekyll ./.nojekyll
+          rm google-ready.zip
 
-      - name: Commit original files
+          echo "Installed $(find google -type f | wc -l) files"
+          echo "Main HTML: $(wc -c < google/index.html) bytes"
+
+      - name: Commit installed landing
         shell: bash
         run: |
           git config user.name 'github-actions[bot]'
           git config user.email '41898282+github-actions[bot]@users.noreply.github.com'
-          git add -A google google-deploy-payload .nojekyll
-          if git diff --cached --quiet; then
-            echo 'No changes to commit'
-            exit 0
-          fi
-          git commit -m 'Upload original Google landing files'
-          git push origin HEAD:${{ github.head_ref || github.ref_name }}
+          git add -A google google-ready.zip .nojekyll
+          git commit -m 'Install original Google landing files'
+          git push
