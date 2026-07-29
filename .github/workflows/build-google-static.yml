@@ -1,17 +1,20 @@
-name: Install Google landing package
+name: Build self-contained Google landing
 
 on:
+  workflow_dispatch:
   push:
     branches:
       - main
     paths:
-      - 'google-ready.zip'
+      - '.github/workflows/build-google-static.yml'
+      - 'google/data/**'
+      - 'rebuild-google.txt'
 
 permissions:
   contents: write
 
 jobs:
-  install:
+  build:
     runs-on: ubuntu-latest
     steps:
       - name: Checkout
@@ -19,38 +22,55 @@ jobs:
         with:
           fetch-depth: 0
 
-      - name: Validate and install package
+      - name: Rebuild original landing as one HTML file
         shell: bash
         run: |
-          test -f google-ready.zip
-          rm -rf /tmp/google-ready
-          mkdir -p /tmp/google-ready
-          unzip -q google-ready.zip -d /tmp/google-ready
+          python3 - <<'PY'
+          from pathlib import Path
+          import base64
+          import gzip
+          import re
 
-          test -f /tmp/google-ready/google/index.html
-          test -f /tmp/google-ready/google/_next/static/chunks/2f5u3uk0o3gkc.css
-          test -f /tmp/google-ready/google/landing/hero/bg.png
-          test -f /tmp/google-ready/google/landing/compatibility/google-meta.png
-          test -f /tmp/google-ready/.nojekyll
+          def chunk_number(path: Path) -> int:
+              match = re.search(r'(\d+)$', path.stem)
+              return int(match.group(1)) if match else 0
 
-          if grep -q 'Failed to Decode Data\|__DWH_PARTS__\|DecompressionStream\|atob(' /tmp/google-ready/google/index.html; then
-            echo 'Package contains the old broken loader'
-            exit 1
-          fi
+          def unpack(pattern: str, output: str) -> None:
+              files = sorted(Path('google/data').glob(pattern), key=chunk_number)
+              if not files:
+                  raise SystemExit(f'No files matched {pattern}')
 
-          rm -rf google
-          cp -a /tmp/google-ready/google ./google
-          cp /tmp/google-ready/.nojekyll ./.nojekyll
-          rm google-ready.zip
+              parts = []
+              for file in files:
+                  text = file.read_text(encoding='utf-8').strip()
+                  match = re.search(r'push\("([A-Za-z0-9+/=]+)"\)', text)
+                  if not match:
+                      raise SystemExit(f'Invalid payload: {file}')
+                  parts.append(match.group(1))
 
-          echo "Installed $(find google -type f | wc -l) files"
-          echo "Main HTML: $(wc -c < google/index.html) bytes"
+              html = gzip.decompress(base64.b64decode(''.join(parts)))
+              if len(html) < 1000 or b'<html' not in html.lower():
+                  raise SystemExit(f'Invalid decoded HTML for {output}')
 
-      - name: Commit installed landing
+              Path(output).write_bytes(html)
+              print(f'Wrote {output}: {len(html)} bytes from {len(files)} chunks')
+
+          unpack('ua-*.txt', 'google/index.html')
+
+          if list(Path('google/data').glob('terms-*.txt')):
+              unpack('terms-*.txt', 'google/terms.html')
+          PY
+
+      - name: Commit generated HTML
         shell: bash
         run: |
           git config user.name 'github-actions[bot]'
           git config user.email '41898282+github-actions[bot]@users.noreply.github.com'
-          git add -A google google-ready.zip .nojekyll
-          git commit -m 'Install original Google landing files'
-          git push
+          git add google/index.html
+          if test -f google/terms.html; then git add google/terms.html; fi
+          if git diff --cached --quiet; then
+            echo 'Nothing to commit'
+          else
+            git commit -m 'Build self-contained Google landing [skip ci]'
+            git push origin main
+          fi
