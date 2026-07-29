@@ -2,8 +2,6 @@ name: Deploy original Google landing
 
 on:
   push:
-    paths:
-      - ".github/workflows/deploy-google-landing.yml"
   workflow_dispatch:
 
 permissions:
@@ -11,6 +9,7 @@ permissions:
 
 jobs:
   build-and-publish:
+    if: github.actor != 'github-actions[bot]'
     runs-on: ubuntu-latest
     steps:
       - name: Check out target repository
@@ -62,6 +61,7 @@ jobs:
           cp -a /tmp/dwh-source/out/. google/
           touch .nojekyll
           rm -f .github/workflows/deploy-google-landing.yml
+          rm -f google-deploy-trigger.txt
 
       - name: Commit all landing files and assets
         run: |
