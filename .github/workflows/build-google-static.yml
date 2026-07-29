@@ -1,135 +1,60 @@
-name: Build Google landing static
+name: Deploy original Google landing
 
 on:
-  push:
-    paths:
-      - '.github/workflows/build-google-static.yml'
-      - 'google/build-static-trigger.txt'
-      - 'google/data/**'
   pull_request:
     paths:
-      - 'google/build-static-trigger.txt'
+      - 'google-deploy-payload/**'
   workflow_dispatch:
 
 permissions:
   contents: write
 
 jobs:
-  build:
+  deploy:
     runs-on: ubuntu-latest
     steps:
-      - name: Checkout
+      - name: Checkout source branch
         uses: actions/checkout@v4
         with:
           fetch-depth: 0
-          ref: ${{ github.event_name == 'pull_request' && github.head_ref || github.ref_name }}
+          ref: ${{ github.head_ref || github.ref_name }}
 
-      - name: Decode original landing
+      - name: Restore original static landing
         shell: bash
         run: |
-          python3 - <<'PY'
-          from pathlib import Path
-          import base64
-          import gzip
-          import re
+          if [ ! -d google-deploy-payload ]; then
+            echo 'Payload already consumed'
+            exit 0
+          fi
 
-          root = Path('google/data')
-          alphabet = 'ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789+/'
+          cat google-deploy-payload/part-*.txt | base64 --decode > /tmp/google-site.tar.gz
+          gzip -t /tmp/google-site.tar.gz
 
-          def extract_parts(prefix: str, count: int) -> list[str]:
-              parts = []
-              for i in range(1, count + 1):
-                  path = root / f'{prefix}-{i}.txt'
-                  text = path.read_text(encoding='utf-8-sig')
-                  start = text.find('push("')
-                  end = text.rfind('")')
-                  if start < 0 or end <= start + 6:
-                      raise RuntimeError(f'Cannot parse {path}')
-                  part = re.sub(r'[^A-Za-z0-9+/=]', '', text[start + 6:end])
-                  parts.append(part.replace('=', ''))
-              return parts
+          rm -rf google
+          tar -xzf /tmp/google-site.tar.gz -C .
+          rm -rf google-deploy-payload
 
-          def unpack(encoded: str) -> str:
-              padded = encoded + '=' * (-len(encoded) % 4)
-              raw = base64.b64decode(padded, validate=True)
-              html = gzip.decompress(raw).decode('utf-8')
-              if len(html) < 1000 or '<html' not in html.lower():
-                  raise RuntimeError('Decoded content is not HTML')
-              return html
+          test -f google/index.html
+          test -f google/_next/static/chunks/2f5u3uk0o3gkc.css
+          test -f google/landing/hero/bg.png
+          test -f google/landing/compatibility/google-meta.png
 
-          def decode(prefix: str, count: int) -> str:
-              parts = extract_parts(prefix, count)
-              joined = ''.join(parts)
-              print(prefix, 'part lengths:', [len(p) for p in parts], 'total:', len(joined), 'mod4:', len(joined) % 4)
+          if grep -q 'Failed to Decode Data\|__DWH_PARTS__\|DecompressionStream\|atob(' google/index.html; then
+            echo 'Old broken loader is still present'
+            exit 1
+          fi
 
-              try:
-                  return unpack(joined)
-              except Exception as direct_error:
-                  print(prefix, 'direct decode failed:', repr(direct_error))
+          echo "Static landing restored: $(wc -c < google/index.html) bytes"
 
-              boundaries = [0]
-              offset = 0
-              for part in parts:
-                  offset += len(part)
-                  boundaries.append(offset)
-
-              # The payload is one Base64 stream split into files. One character was
-              # lost while those files were created, so repair it at a split boundary.
-              positions = sorted({
-                  max(0, min(len(joined), boundary + delta))
-                  for boundary in boundaries
-                  for delta in range(-4, 5)
-              })
-
-              for pos in positions:
-                  for ch in alphabet:
-                      candidate = joined[:pos] + ch + joined[pos:]
-                      try:
-                          html = unpack(candidate)
-                          print(prefix, 'repaired missing character at', pos, 'with', ch)
-                          return html
-                      except Exception:
-                          pass
-
-              # Also handle one accidental extra character near a split boundary.
-              for pos in positions:
-                  if pos >= len(joined):
-                      continue
-                  candidate = joined[:pos] + joined[pos + 1:]
-                  try:
-                      html = unpack(candidate)
-                      print(prefix, 'removed extra character at', pos)
-                      return html
-                  except Exception:
-                      pass
-
-              raise RuntimeError(f'Could not repair {prefix} payload')
-
-          main_html = decode('ua', 9)
-          terms_html = decode('terms', 3)
-
-          redirect = "<script>if(new URLSearchParams(location.search).get('terms')==='1'){location.replace('/google/terms.html')}</script>"
-          if '<head>' in main_html:
-              main_html = main_html.replace('<head>', '<head>' + redirect, 1)
-          else:
-              main_html = redirect + main_html
-
-          Path('google/index.html').write_text(main_html, encoding='utf-8')
-          Path('google/terms.html').write_text(terms_html, encoding='utf-8')
-
-          print('main bytes:', len(main_html.encode('utf-8')))
-          print('terms bytes:', len(terms_html.encode('utf-8')))
-          PY
-
-      - name: Commit static HTML
+      - name: Commit original files
         shell: bash
         run: |
           git config user.name 'github-actions[bot]'
           git config user.email '41898282+github-actions[bot]@users.noreply.github.com'
-          git add google/index.html google/terms.html
+          git add -A google google-deploy-payload .nojekyll
           if git diff --cached --quiet; then
             echo 'No changes to commit'
             exit 0
           fi
-          git commit -m 'Serve original Google landing as static HTML'
-          git push origin HEAD:${{ github.event_name == 'pull_request' && github.head_ref || github.ref_name }}
+          git commit -m 'Upload original Google landing files'
+          git push origin HEAD:${{ github.head_ref || github.ref_name }}
