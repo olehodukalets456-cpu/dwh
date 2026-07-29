@@ -1,0 +1,66 @@
+name: Build Google landing
+
+on:
+  push:
+    branches: [main]
+    paths:
+      - '.github/workflows/build-google-landing.yml'
+      - 'google/data/**'
+      - 'google/build-trigger.txt'
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Assemble original landing files
+        shell: bash
+        run: |
+          python3 - <<'PY'
+          from pathlib import Path
+          import base64, gzip, re
+
+          def assemble(prefix: str, count: int, output: str) -> None:
+              parts = []
+              for i in range(1, count + 1):
+                  path = Path(f'google/data/{prefix}-{i}.txt')
+                  text = path.read_text(encoding='utf-8')
+                  match = re.search(r'push\("([A-Za-z0-9+/=]+)"\)', text)
+                  if not match:
+                      raise RuntimeError(f'Cannot read payload from {path}')
+                  parts.append(match.group(1))
+
+              compressed = base64.b64decode(''.join(parts), validate=True)
+              html = gzip.decompress(compressed).decode('utf-8')
+              if len(html) < 1000 or '<html' not in html.lower():
+                  raise RuntimeError(f'Invalid assembled HTML for {output}')
+
+              target = Path(output)
+              target.parent.mkdir(parents=True, exist_ok=True)
+              target.write_text(html, encoding='utf-8')
+              print(f'Built {output}: {len(html)} bytes')
+
+          assemble('ua', 9, 'google/index.html')
+          assemble('terms', 3, 'google/terms/index.html')
+          PY
+
+      - name: Commit assembled files
+        shell: bash
+        run: |
+          git config user.name 'github-actions[bot]'
+          git config user.email '41898282+github-actions[bot]@users.noreply.github.com'
+          git add google/index.html google/terms/index.html
+          if git diff --cached --quiet; then
+            echo 'No changes to commit'
+          else
+            git commit -m 'Build original Google landing as static HTML'
+            git push
+          fi
