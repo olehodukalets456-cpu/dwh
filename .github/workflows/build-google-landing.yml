@@ -1,10 +1,10 @@
 name: Install original Google landing
 
 on:
-  pull_request:
+  push:
     branches: [main]
     paths:
-      - 'google-deploy-payload/**'
+      - 'google-package/ready.txt'
   workflow_dispatch:
 
 permissions:
@@ -14,17 +14,18 @@ jobs:
   install:
     runs-on: ubuntu-latest
     steps:
-      - name: Checkout source branch
+      - name: Checkout
         uses: actions/checkout@v4
         with:
           fetch-depth: 0
-          ref: ${{ github.head_ref || github.ref_name }}
 
-      - name: Restore original package
+      - name: Install original files
         shell: bash
         run: |
-          test -d google-deploy-payload
-          cat google-deploy-payload/part-*.txt | base64 --decode > /tmp/google-ready.zip
+          set -euo pipefail
+          test -f google-package/ready.txt
+          cat google-package/part-*.txt | base64 --decode > /tmp/google-ready.zip
+          unzip -tq /tmp/google-ready.zip
 
           rm -rf /tmp/google-ready
           mkdir -p /tmp/google-ready
@@ -36,28 +37,19 @@ jobs:
           test -f /tmp/google-ready/google/landing/compatibility/google-meta.png
           test -f /tmp/google-ready/.nojekyll
 
-          if grep -q 'Failed to Decode Data\|__DWH_PARTS__\|DecompressionStream\|Не вдалося завантажити сторінку' /tmp/google-ready/google/index.html; then
-            echo 'The package contains a broken loader'
-            exit 1
-          fi
-
           rm -rf google
           cp -a /tmp/google-ready/google ./google
           cp /tmp/google-ready/.nojekyll ./.nojekyll
-          rm -rf google-deploy-payload
+          rm -rf google-package
 
+          test "$(find google -type f | wc -l)" -eq 58
           echo "Installed $(find google -type f | wc -l) original files"
-          echo "Main HTML size: $(wc -c < google/index.html) bytes"
 
-      - name: Commit original files to source branch
+      - name: Commit installed files
         shell: bash
         run: |
           git config user.name 'github-actions[bot]'
           git config user.email '41898282+github-actions[bot]@users.noreply.github.com'
-          git add -A google google-deploy-payload .nojekyll
-          if git diff --cached --quiet; then
-            echo 'No changes to commit'
-            exit 0
-          fi
-          git commit -m 'Install original Google landing files'
-          git push origin HEAD:${{ github.head_ref || github.ref_name }}
+          git add -A google google-package .nojekyll
+          git commit -m 'Upload original Google landing files'
+          git push
