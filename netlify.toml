@@ -1,8 +1,0 @@
-[build]
-  command = "python3 scripts/build_google_static.py"
-  publish = "."
-
-[[headers]]
-  for = "/google/*"
-  [headers.values]
-    Cache-Control = "no-cache, no-store, must-revalidate"
