@@ -1,0 +1,65 @@
+name: Bust FB image cache
+
+on:
+  push:
+    branches: [main]
+    paths:
+      - 'bust-fb-image-cache.trigger'
+
+permissions:
+  contents: write
+
+jobs:
+  bust:
+    if: github.actor != 'github-actions[bot]'
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Version all FB image URLs
+        shell: bash
+        run: |
+          set -euo pipefail
+          python3 - <<'PY'
+          from pathlib import Path
+          import re
+
+          version = 'fbimg-edb15c'
+          root = Path('fb')
+          text_exts = {'.html', '.js', '.css', '.json', '.txt', '.xml', '.map', '.rsc'}
+          pattern = re.compile(r'(/fb/(?:logo\.png|landing/[^"\'\s)]+\.(?:png|jpg|jpeg|webp|svg|gif)))(?:\?v=[A-Za-z0-9._-]+)?')
+
+          changed = 0
+          for path in root.rglob('*'):
+              if not path.is_file() or path.suffix.lower() not in text_exts:
+                  continue
+              try:
+                  text = path.read_text(encoding='utf-8')
+              except UnicodeDecodeError:
+                  continue
+              new = pattern.sub(lambda m: f'{m.group(1)}?v={version}', text)
+              if new != text:
+                  path.write_text(new, encoding='utf-8')
+                  changed += 1
+
+          if changed == 0:
+              raise SystemExit('No FB image references were versioned')
+          print(f'Updated {changed} files')
+          PY
+
+          grep -q '/fb/logo.png?v=fbimg-edb15c' fb/ua/index.html
+          grep -q '/fb/landing/compatibility/google-meta.png?v=fbimg-edb15c' fb/ua/index.html
+          grep -q '/fb/landing/advantages/shield-check.svg?v=fbimg-edb15c' fb/ua/index.html
+          rm -f bust-fb-image-cache.trigger
+
+      - name: Commit cache-busted FB assets
+        shell: bash
+        run: |
+          set -euo pipefail
+          git config user.name 'github-actions[bot]'
+          git config user.email '41898282+github-actions[bot]@users.noreply.github.com'
+          git add -A fb bust-fb-image-cache.trigger
+          git commit -m 'Bust FB image cache'
+          git push origin main
