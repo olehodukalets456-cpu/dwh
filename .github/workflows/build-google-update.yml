@@ -46,9 +46,21 @@ jobs:
           set -euo pipefail
           cd /tmp/dwh2-build
 
-          # GitHub Pages cannot run middleware or dynamic metadata-image routes.
+          # GitHub Pages cannot run middleware or dynamic server routes.
           rm -f src/proxy.ts
           rm -f 'src/app/[locale]/opengraph-image.tsx'
+          rm -rf 'src/app/[locale]/[...rest]'
+
+          # The dynamic OG route is removed for static hosting, so remove stale metadata links to it.
+          python3 - <<'PY'
+          from pathlib import Path
+
+          page = Path('src/app/[locale]/(marketing)/page.tsx')
+          text = page.read_text(encoding='utf-8')
+          text = text.replace('  // Custom `openGraph`/`twitter` objects replace, not merge with, Next\'s auto-detected\n  // file-convention image, so the path must be referenced explicitly here.\n  const shareImagePath = `/${locale}/opengraph-image`;\n\n', '')
+          text = text.replace('      images: [shareImagePath],\n', '')
+          page.write_text(text, encoding='utf-8')
+          PY
 
           cat > next.config.ts <<'EOF'
           import type { NextConfig } from "next";
