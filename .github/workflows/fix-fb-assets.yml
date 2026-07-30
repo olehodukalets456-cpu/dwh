@@ -1,0 +1,140 @@
+name: Fix FB landing assets
+
+on:
+  push:
+    branches: [main]
+    paths:
+      - '.github/workflows/fix-fb-assets.yml'
+      - 'fix-fb-assets.trigger'
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+jobs:
+  fix:
+    if: github.actor != 'github-actions[bot]'
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Fix every FB asset reference
+        shell: bash
+        run: |
+          set -euo pipefail
+          test -d fb
+
+          python3 - <<'PY'
+          from pathlib import Path
+          import re
+
+          root = Path('fb')
+          binary_exts = {
+              '.png', '.jpg', '.jpeg', '.gif', '.webp', '.ico',
+              '.woff', '.woff2', '.ttf', '.eot', '.pdf', '.zip'
+          }
+
+          replacements = [
+              (re.compile(r'(?<!/fb)/landing/'), '/fb/landing/'),
+              (re.compile(r'(?<!/fb)/logo\.png'), '/fb/logo.png'),
+              (re.compile(r'(?<!/fb)/favicon\.ico'), '/fb/favicon.ico'),
+              (re.compile(r'(?<!/fb)\\/landing\\/'), r'\\/fb\\/landing\\/'),
+              (re.compile(r'(?<!/fb)\\/logo\.png'), r'\\/fb\\/logo.png'),
+              (re.compile(r'(?<!/fb)\\/favicon\.ico'), r'\\/fb\\/favicon.ico'),
+              (re.compile(r'(?<!/fb)%2Flanding%2F', re.I), '%2Ffb%2Flanding%2F'),
+              (re.compile(r'(?<!/fb)%2Flogo\.png', re.I), '%2Ffb%2Flogo.png'),
+          ]
+
+          changed = []
+          for path in root.rglob('*'):
+              if not path.is_file() or path.suffix.lower() in binary_exts:
+                  continue
+              try:
+                  text = path.read_text(encoding='utf-8')
+              except UnicodeDecodeError:
+                  continue
+              original = text
+              for pattern, replacement in replacements:
+                  text = pattern.sub(replacement, text)
+              if text != original:
+                  path.write_text(text, encoding='utf-8')
+                  changed.append(str(path))
+
+          print(f'Patched {len(changed)} text files')
+          for item in changed:
+              print(item)
+
+          asset_pattern = re.compile(
+              r'/fb/[^\"\'\s)>,]+\.(?:png|jpe?g|gif|webp|svg|ico)', re.I
+          )
+          missing = {}
+          for path in root.rglob('*'):
+              if not path.is_file() or path.suffix.lower() in binary_exts:
+                  continue
+              try:
+                  text = path.read_text(encoding='utf-8')
+              except UnicodeDecodeError:
+                  continue
+              for match in asset_pattern.findall(text):
+                  clean = match.split('?', 1)[0].split('#', 1)[0]
+                  target = Path(clean.lstrip('/'))
+                  if not target.is_file():
+                      missing.setdefault(str(target), set()).add(str(path))
+
+          stale_pattern = re.compile(
+              r'(?<!/fb)/(?:landing/[^\"\'\s)>,]+|logo\.png|favicon\.ico)', re.I
+          )
+          stale = []
+          for path in root.rglob('*'):
+              if not path.is_file() or path.suffix.lower() in binary_exts:
+                  continue
+              try:
+                  text = path.read_text(encoding='utf-8')
+              except UnicodeDecodeError:
+                  continue
+              if stale_pattern.search(text):
+                  stale.append(str(path))
+
+          if missing:
+              print('Missing referenced assets:')
+              for asset, sources in sorted(missing.items()):
+                  print(f'  {asset} <- {sorted(sources)}')
+              raise SystemExit(1)
+
+          if stale:
+              print('Stale root-level asset references remain:')
+              for path in stale:
+                  print(f'  {path}')
+              raise SystemExit(1)
+
+          required = [
+              Path('fb/logo.png'),
+              Path('fb/landing/compatibility/google-meta.png'),
+              Path('fb/landing/compatibility/google.svg'),
+              Path('fb/landing/compatibility/meta.svg'),
+              Path('fb/landing/advantages/shield-check.svg'),
+          ]
+          for path in required:
+              if not path.is_file():
+                  raise SystemExit(f'Required asset is missing: {path}')
+
+          print('All FB image references are valid')
+          PY
+
+      - name: Commit fixed FB landing
+        shell: bash
+        run: |
+          set -euo pipefail
+          rm -f fix-fb-assets.trigger
+          git config user.name 'github-actions[bot]'
+          git config user.email '41898282+github-actions[bot]@users.noreply.github.com'
+          git add -A fb fix-fb-assets.trigger
+          if git diff --cached --quiet; then
+            echo 'No asset changes were needed'
+            exit 0
+          fi
+          git commit -m 'Fix all FB landing image paths'
+          git push origin main
