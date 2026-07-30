@@ -4,6 +4,7 @@ on:
   push:
     branches: [main]
     paths:
+      - '.github/workflows/build-google-update.yml'
       - 'google-update.zip'
   workflow_dispatch:
 
@@ -45,8 +46,9 @@ jobs:
           set -euo pipefail
           cd /tmp/dwh2-build
 
-          # GitHub Pages cannot run Next.js middleware/proxy at request time.
+          # GitHub Pages cannot run middleware or dynamic metadata-image routes.
           rm -f src/proxy.ts
+          rm -f 'src/app/[locale]/opengraph-image.tsx'
 
           cat > next.config.ts <<'EOF'
           import type { NextConfig } from "next";
@@ -115,5 +117,5 @@ jobs:
             echo 'Nothing changed'
             exit 0
           fi
-          git commit -m 'Publish updated Google landing'
+          git commit -m 'Publish updated Google landing [skip ci]'
           git push origin main
