@@ -46,10 +46,12 @@ jobs:
           set -euo pipefail
           cd /tmp/dwh2-build
 
-          # GitHub Pages cannot run middleware or dynamic server routes.
+          # GitHub Pages serves static files only. Remove server-only routes during export.
           rm -f src/proxy.ts
           rm -f 'src/app/[locale]/opengraph-image.tsx'
           rm -rf 'src/app/[locale]/[...rest]'
+          rm -f src/app/robots.ts
+          rm -f src/app/sitemap.ts
 
           # The dynamic OG route is removed for static hosting, so remove stale metadata links to it.
           python3 - <<'PY'
