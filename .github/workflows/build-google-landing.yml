@@ -4,7 +4,8 @@ on:
   push:
     branches: [main]
     paths:
-      - 'google-ready.zip'
+      - '.github/workflows/build-google-landing.yml'
+      - 'google-ready*.zip'
   workflow_dispatch:
 
 permissions:
@@ -23,12 +24,14 @@ jobs:
         shell: bash
         run: |
           set -euo pipefail
-          test -f google-ready.zip
-          unzip -tq google-ready.zip
+
+          ZIP_FILE="$(find . -maxdepth 1 -type f -name 'google-ready*.zip' | sort | head -n 1)"
+          test -n "$ZIP_FILE"
+          unzip -tq "$ZIP_FILE"
 
           rm -rf /tmp/google-ready
           mkdir -p /tmp/google-ready
-          unzip -q google-ready.zip -d /tmp/google-ready
+          unzip -q "$ZIP_FILE" -d /tmp/google-ready
 
           test -f /tmp/google-ready/google/index.html
           test -f /tmp/google-ready/google/_next/static/chunks/2f5u3uk0o3gkc.css
@@ -39,7 +42,7 @@ jobs:
           rm -rf google
           cp -a /tmp/google-ready/google ./google
           cp /tmp/google-ready/.nojekyll ./.nojekyll
-          rm google-ready.zip
+          rm -f google-ready*.zip
 
           test "$(find google -type f | wc -l)" -eq 58
           echo "Installed $(find google -type f | wc -l) original files"
@@ -49,6 +52,10 @@ jobs:
         run: |
           git config user.name 'github-actions[bot]'
           git config user.email '41898282+github-actions[bot]@users.noreply.github.com'
-          git add -A google google-ready.zip .nojekyll
-          git commit -m 'Upload original Google landing files'
+          git add -A google .nojekyll google-ready*.zip || true
+          if git diff --cached --quiet; then
+            echo 'Nothing to commit'
+            exit 0
+          fi
+          git commit -m 'Upload original Google landing files [skip ci]'
           git push
