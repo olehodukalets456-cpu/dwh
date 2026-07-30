@@ -1,0 +1,66 @@
+name: Install FB landing
+
+on:
+  push:
+    branches: [main]
+    paths:
+      - 'fb-ready*.zip'
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+jobs:
+  install:
+    if: github.actor != 'github-actions[bot]'
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Find and validate package
+        id: package
+        shell: bash
+        run: |
+          set -euo pipefail
+          ZIP_FILE="$(find . -maxdepth 1 -type f -name 'fb-ready*.zip' -print -quit)"
+          test -n "$ZIP_FILE"
+          unzip -tq "$ZIP_FILE"
+          echo "zip_file=$ZIP_FILE" >> "$GITHUB_OUTPUT"
+
+      - name: Install FB landing
+        shell: bash
+        run: |
+          set -euo pipefail
+          ZIP_FILE='${{ steps.package.outputs.zip_file }}'
+          rm -rf /tmp/fb-ready
+          mkdir -p /tmp/fb-ready
+          unzip -q "$ZIP_FILE" -d /tmp/fb-ready
+
+          test -f /tmp/fb-ready/fb/index.html
+          test -f /tmp/fb-ready/fb/ua/index.html
+          test -f /tmp/fb-ready/fb/logo.png
+          test -f /tmp/fb-ready/fb/landing/compatibility/google-meta.png
+          grep -q "1744987639853086" /tmp/fb-ready/fb/ua/index.html
+          grep -q '/fb/_next/' /tmp/fb-ready/fb/ua/index.html
+
+          rm -rf fb
+          cp -a /tmp/fb-ready/fb ./fb
+          touch .nojekyll
+          rm -f ./fb-ready*.zip
+
+      - name: Commit published landing
+        shell: bash
+        run: |
+          set -euo pipefail
+          git config user.name 'github-actions[bot]'
+          git config user.email '41898282+github-actions[bot]@users.noreply.github.com'
+          git add -A fb .nojekyll 'fb-ready*.zip'
+          if git diff --cached --quiet; then
+            echo 'Nothing changed'
+            exit 0
+          fi
+          git commit -m 'Publish FB landing with Meta Pixel'
+          git push origin main
