@@ -1,0 +1,104 @@
+name: Rebuild FB from working Google landing
+
+on:
+  push:
+    branches: [main]
+    paths:
+      - 'rebuild-fb-from-google.trigger'
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+jobs:
+  rebuild:
+    if: github.actor != 'github-actions[bot]'
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Rebuild FB from Google
+        shell: bash
+        run: |
+          set -euo pipefail
+          test -f google/ua/index.html
+          test -f google/logo.png
+          test -f google/landing/compatibility/google-meta.png
+
+          rm -rf fb
+          cp -a google fb
+
+          python3 - <<'PY'
+          from pathlib import Path
+
+          root = Path('fb')
+          text_exts = {'.html', '.js', '.css', '.json', '.txt', '.xml', '.map', '.rsc'}
+          pixel = '''<!-- Meta Pixel Code -->
+          <script>
+          !function(f,b,e,v,n,t,s)
+          {if(f.fbq)return;n=f.fbq=function(){n.callMethod?
+          n.callMethod.apply(n,arguments):n.queue.push(arguments)};
+          if(!f._fbq)f._fbq=n;n.push=n;n.loaded=!0;n.version='2.0';
+          n.queue=[];t=b.createElement(e);t.async=!0;
+          t.src=v;s=b.getElementsByTagName(e)[0];
+          s.parentNode.insertBefore(t,s)}(window, document,'script',
+          'https://connect.facebook.net/en_US/fbevents.js');
+          fbq('init', '1744987639853086');
+          fbq('track', 'PageView');
+          </script>
+          <noscript><img height="1" width="1" style="display:none"
+          src="https://www.facebook.com/tr?id=1744987639853086&ev=PageView&noscript=1"
+          /></noscript>
+          <!-- End Meta Pixel Code -->'''
+
+          for path in root.rglob('*'):
+              if not path.is_file() or path.suffix.lower() not in text_exts:
+                  continue
+              try:
+                  text = path.read_text(encoding='utf-8')
+              except UnicodeDecodeError:
+                  continue
+              text = text.replace('https://domainswithhistory.shop/google', 'https://domainswithhistory.shop/fb')
+              text = text.replace('/google/', '/fb/')
+              text = text.replace('"/google"', '"/fb"')
+              text = text.replace("'/google'", "'/fb'")
+              if path.suffix.lower() == '.html' and '1744987639853086' not in text:
+                  if '</head>' in text:
+                      text = text.replace('</head>', pixel + '\n</head>', 1)
+                  else:
+                      text = pixel + '\n' + text
+              path.write_text(text, encoding='utf-8')
+          PY
+
+          # Hard checks against the exact failures seen before.
+          grep -q '/fb/logo.png' fb/ua/index.html
+          grep -q '/fb/landing/compatibility/google-meta.png' fb/ua/index.html
+          grep -q '/fb/landing/advantages/shield-check.svg' fb/ua/index.html
+          grep -q '1744987639853086' fb/ua/index.html
+          ! grep -RIl --include='*.html' --include='*.js' --include='*.css' --include='*.json' '/google/' fb | grep -q .
+
+          test -f fb/logo.png
+          test -f fb/landing/compatibility/google-meta.png
+          test -f fb/landing/advantages/shield-check.svg
+          test -f fb/landing/profit/table_1.svg
+          test -f fb/landing/profit/table_2.svg
+
+          rm -f rebuild-fb-from-google.trigger
+          touch .nojekyll
+
+      - name: Commit rebuilt FB landing
+        shell: bash
+        run: |
+          set -euo pipefail
+          git config user.name 'github-actions[bot]'
+          git config user.email '41898282+github-actions[bot]@users.noreply.github.com'
+          git add -A fb rebuild-fb-from-google.trigger .nojekyll
+          if git diff --cached --quiet; then
+            echo 'Nothing changed'
+            exit 0
+          fi
+          git commit -m 'Rebuild FB from working Google landing'
+          git push origin main
