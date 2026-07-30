@@ -13,6 +13,7 @@ permissions:
 
 jobs:
   build:
+    if: github.actor != 'github-actions[bot]'
     runs-on: ubuntu-latest
     steps:
       - name: Checkout
@@ -101,7 +102,6 @@ jobs:
           rm -rf google
           cp -a /tmp/dwh2-build/out ./google
 
-          # Keep /google/ as the stable public entry point.
           cat > google/index.html <<'EOF'
           <!doctype html>
           <html lang="uk">
@@ -131,5 +131,5 @@ jobs:
             echo 'Nothing changed'
             exit 0
           fi
-          git commit -m 'Publish updated Google landing [skip ci]'
+          git commit -m 'Publish updated Google landing'
           git push origin main
