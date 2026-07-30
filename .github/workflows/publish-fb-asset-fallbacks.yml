@@ -1,0 +1,66 @@
+name: Publish FB asset fallbacks
+
+on:
+  push:
+    branches: [main]
+    paths:
+      - '.github/workflows/publish-fb-asset-fallbacks.yml'
+      - 'publish-fb-fallbacks.trigger'
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+jobs:
+  publish:
+    if: github.actor != 'github-actions[bot]'
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Publish root-level fallback assets
+        shell: bash
+        run: |
+          set -euo pipefail
+          test -f fb/logo.png
+          test -d fb/landing
+
+          rm -rf landing
+          cp -a fb/landing ./landing
+          cp -f fb/logo.png ./logo.png
+          cp -f fb/favicon.ico ./favicon.ico
+
+          # Verify the exact assets currently missing in browsers.
+          test -f logo.png
+          test -f landing/compatibility/google-meta.png
+          test -f landing/compatibility/google.svg
+          test -f landing/compatibility/meta.svg
+          test -f landing/advantages/shield-check.svg
+          test -f landing/advantages/heart.svg
+          test -f landing/advantages/zap.svg
+          test -f landing/advantages/ban.svg
+          test -f landing/advantages/trending-up.svg
+          test -f landing/advantages/square.svg
+          test -f landing/profit/table_1.svg
+          test -f landing/profit/table_2.svg
+          test -f landing/profit/check.svg
+          test -f landing/profit/cross.svg
+
+          rm -f publish-fb-fallbacks.trigger
+
+      - name: Commit fallback assets
+        shell: bash
+        run: |
+          set -euo pipefail
+          git config user.name 'github-actions[bot]'
+          git config user.email '41898282+github-actions[bot]@users.noreply.github.com'
+          git add -A landing logo.png favicon.ico publish-fb-fallbacks.trigger
+          if git diff --cached --quiet; then
+            echo 'Fallback assets already exist'
+            exit 0
+          fi
+          git commit -m 'Publish root fallback images for FB landing'
+          git push origin main
