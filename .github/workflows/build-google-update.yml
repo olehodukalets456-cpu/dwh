@@ -1,0 +1,119 @@
+name: Build updated Google landing
+
+on:
+  push:
+    branches: [main]
+    paths:
+      - 'google-update.zip'
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Setup Node
+        uses: actions/setup-node@v4
+        with:
+          node-version: '24'
+
+      - name: Extract source package
+        shell: bash
+        run: |
+          set -euo pipefail
+          test -f google-update.zip
+          unzip -tq google-update.zip
+          rm -rf /tmp/google-update /tmp/dwh2-build
+          mkdir -p /tmp/google-update /tmp/dwh2-build
+          unzip -q google-update.zip -d /tmp/google-update
+
+          SOURCE_PACKAGE="$(find /tmp/google-update -maxdepth 3 -type f -name package.json | head -n 1)"
+          test -n "$SOURCE_PACKAGE"
+          SOURCE_DIR="$(dirname "$SOURCE_PACKAGE")"
+          cp -a "$SOURCE_DIR"/. /tmp/dwh2-build/
+
+      - name: Configure static export
+        shell: bash
+        run: |
+          set -euo pipefail
+          cd /tmp/dwh2-build
+
+          # GitHub Pages cannot run Next.js middleware/proxy at request time.
+          rm -f src/proxy.ts
+
+          cat > next.config.ts <<'EOF'
+          import type { NextConfig } from "next";
+          import createNextIntlPlugin from "next-intl/plugin";
+
+          const nextConfig: NextConfig = {
+            output: "export",
+            basePath: "/google",
+            assetPrefix: "/google",
+            trailingSlash: true,
+            images: { unoptimized: true },
+          };
+
+          const withNextIntl = createNextIntlPlugin("./src/i18n/request.ts");
+          export default withNextIntl(nextConfig);
+          EOF
+
+      - name: Install dependencies and build
+        shell: bash
+        env:
+          NEXT_PUBLIC_SITE_URL: https://domainswithhistory.shop/google
+          NEXT_TELEMETRY_DISABLED: '1'
+        run: |
+          set -euo pipefail
+          cd /tmp/dwh2-build
+          npm ci
+          npm run build
+          test -d out
+          test -f out/ua/index.html
+          test -d out/_next
+
+      - name: Replace published landing
+        shell: bash
+        run: |
+          set -euo pipefail
+          rm -rf google
+          cp -a /tmp/dwh2-build/out ./google
+
+          # Keep /google/ as the stable public entry point.
+          cat > google/index.html <<'EOF'
+          <!doctype html>
+          <html lang="uk">
+          <head>
+            <meta charset="utf-8">
+            <meta name="viewport" content="width=device-width,initial-scale=1">
+            <meta http-equiv="refresh" content="0;url=/google/ua/">
+            <link rel="canonical" href="https://domainswithhistory.shop/google/ua/">
+            <title>DWH HUB</title>
+            <script>location.replace('/google/ua/');</script>
+          </head>
+          <body><a href="/google/ua/">Відкрити сайт</a></body>
+          </html>
+          EOF
+
+          touch .nojekyll
+          rm -f google-update.zip
+
+      - name: Commit generated site
+        shell: bash
+        run: |
+          set -euo pipefail
+          git config user.name 'github-actions[bot]'
+          git config user.email '41898282+github-actions[bot]@users.noreply.github.com'
+          git add -A google google-update.zip .nojekyll
+          if git diff --cached --quiet; then
+            echo 'Nothing changed'
+            exit 0
+          fi
+          git commit -m 'Publish updated Google landing'
+          git push origin main
